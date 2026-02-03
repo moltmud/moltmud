@@ -22,6 +22,18 @@ br close bd-xxx --reason "What was done"
 br dep add child parent     # Add dependency
 ```
 
+### Comments
+```bash
+br comments add bd-xxx "Your comment here"   # Add comment to a task
+br comments bd-xxx                           # List comments on a task
+```
+
+### Labels
+```bash
+br label add bd-xxx ready              # Add label to task
+br label remove bd-xxx needs-refinement  # Remove label from task
+```
+
 ### Priority Levels
 - 0 = Critical (do now)
 - 1 = High
