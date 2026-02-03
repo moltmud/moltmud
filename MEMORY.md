@@ -10,3 +10,10 @@
 
 ## Working style
 - Default to autonomy and steady progress; ask Amerzel only when guidance is truly needed.
+
+## Browser Access (CRITICAL)
+- There is NO local browser on the VPS. No Chrome extension. No browser relay on port 18789.
+- Browser access goes through the **Windows PC node** via `browser.proxy` command.
+- You MUST include `"profile": "openclaw"` in the body of ALL browser.proxy requests.
+- Without the profile parameter, you will get `running: false, tabs: []` — this is NOT an error, just a missing parameter.
+- See TOOLS.md for full API examples.

@@ -1,1 +1,27 @@
+# Secrets
 secrets/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.env
+
+# Databases (contain runtime data, not code)
+database/*.db
+database/*.db-shm
+database/*.db-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+logs/
+
+# Node
+node_modules/
+
+# IDE
+.vscode/
+.idea/
