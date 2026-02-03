@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-PM Agent - Reviews tasks and ensures they are concrete and actionable.
+PM Agent - Reviews tasks and refines vague ones to be concrete and actionable.
 
 Runs periodically to:
 1. Find tasks without 'ready' label
 2. Check if they have required elements (steps, acceptance criteria)
-3. Add comments requesting clarification for vague tasks
+3. For vague tasks: call LLM to generate proper specs, then update the task
 4. Add 'ready' label when tasks meet quality bar
 """
 
@@ -14,6 +14,7 @@ import subprocess
 import os
 import re
 import urllib.request
+import ssl
 from datetime import datetime, timezone
 
 WORKSPACE = os.path.expanduser("~/.openclaw/workspace")
@@ -21,6 +22,10 @@ BR_PATH = os.path.expanduser("~/.local/bin/br")
 LOG_DIR = os.path.expanduser("~/.openclaw/workspace/logs")
 MC_URL = "http://127.0.0.1:8001/api"
 AGENT_NAME = "pm-agent"
+
+# NVIDIA API configuration
+NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+NVIDIA_MODEL = "moonshotai/kimi-k2.5"
 
 # Quality checklist - what makes a task "ready"
 REQUIRED_ELEMENTS = [
@@ -35,6 +40,9 @@ SIMPLE_TASK_PATTERNS = [
     r"(?i)bump version",
 ]
 
+# Max tasks to refine per run (to avoid long runs and API costs)
+MAX_REFINE_PER_RUN = 3
+
 
 def log(msg):
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -43,6 +51,19 @@ def log(msg):
     os.makedirs(LOG_DIR, exist_ok=True)
     with open(os.path.join(LOG_DIR, "pm_agent.log"), "a") as f:
         f.write(line + "\n")
+
+
+def get_api_key():
+    """Read NVIDIA API key from .env file."""
+    env_path = os.path.expanduser("~/.openclaw/.env")
+    try:
+        with open(env_path) as f:
+            for line in f:
+                if line.startswith("NVIDIA_API_KEY="):
+                    return line.strip().split("=", 1)[1]
+    except Exception as e:
+        log(f"Failed to read API key: {e}")
+    return None
 
 
 def run_br(args):
@@ -97,11 +118,9 @@ def check_task_quality(task_id, title, details):
     Check if a task meets quality bar.
     Returns (is_ready, missing_elements)
     """
-    # Simple tasks are auto-ready
     if is_simple_task(title):
         return True, []
 
-    # Check for required elements in title + details
     full_text = f"{title}\n{details}"
     missing = []
 
@@ -120,6 +139,94 @@ def add_comment(task_id, comment):
 def add_label(task_id, label):
     """Add a label to a task."""
     run_br(["label", "add", task_id, label])
+
+
+def remove_label(task_id, label):
+    """Remove a label from a task."""
+    run_br(["label", "remove", task_id, label])
+
+
+def call_llm(prompt):
+    """Call NVIDIA API directly to generate refined task content."""
+    api_key = get_api_key()
+    if not api_key:
+        log("No API key available")
+        return None
+
+    try:
+        payload = {
+            "model": NVIDIA_MODEL,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 1024,
+            "temperature": 0.7,
+        }
+
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            NVIDIA_API_URL,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+        )
+
+        # Create SSL context
+        ctx = ssl.create_default_context()
+
+        with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            choices = result.get("choices", [])
+            if choices:
+                return choices[0].get("message", {}).get("content", "")
+            return None
+
+    except urllib.error.HTTPError as e:
+        log(f"LLM API error: {e.code} - {e.read().decode()[:200]}")
+        return None
+    except Exception as e:
+        log(f"LLM call error: {e}")
+        return None
+
+
+def refine_task(task_id, title, details):
+    """Use LLM to generate proper specs for a vague task."""
+    prompt = f"""You are a PM agent. Refine this task to be concrete and actionable.
+
+Task ID: {task_id}
+Title: {title}
+Current Details:
+{details}
+
+Generate a refined version with:
+1. Clear implementation steps (numbered list)
+2. Acceptance criteria (how do we know when it's done?)
+3. Any clarifications or assumptions
+
+Output ONLY the refined task content in this format:
+
+## Implementation Steps
+1. Step one
+2. Step two
+...
+
+## Acceptance Criteria
+- Criterion one
+- Criterion two
+...
+
+## Notes
+Any clarifications or assumptions."""
+
+    return call_llm(prompt)
+
+
+def update_task_with_refinement(task_id, refinement):
+    """Add the refinement as a comment on the task."""
+    comment = f"[PM Agent - Refined]\n\n{refinement}"
+    add_comment(task_id, comment)
 
 
 def record_heartbeat(status, detail=""):
@@ -153,8 +260,9 @@ def main():
 
     reviewed = 0
     marked_ready = 0
-    needs_work = 0
+    refined = 0
     already_ready = 0
+    skipped_needs_refinement = 0
 
     for task in tasks:
         task_id = task.get("id", "")
@@ -165,11 +273,28 @@ def main():
             already_ready += 1
             continue
 
-        # Skip if already has 'needs-refinement' label (already flagged)
+        # Process tasks with 'needs-refinement' label (refine them!)
         if has_label(task, "needs-refinement"):
+            if refined >= MAX_REFINE_PER_RUN:
+                skipped_needs_refinement += 1
+                continue
+
+            log(f"Refining {task_id}: {title[:50]}")
+            details = get_task_details(task_id)
+
+            refinement = refine_task(task_id, title, details)
+            if refinement:
+                update_task_with_refinement(task_id, refinement)
+                remove_label(task_id, "needs-refinement")
+                add_label(task_id, "ready")
+                log(f"✓ {task_id}: Refined and ready - {title[:50]}")
+                refined += 1
+                marked_ready += 1
+            else:
+                log(f"✗ {task_id}: Refinement failed - {title[:50]}")
             continue
 
-        # Get full details
+        # Get full details for new tasks
         details = get_task_details(task_id)
 
         # Check quality
@@ -180,27 +305,31 @@ def main():
             log(f"✓ {task_id}: Ready - {title[:50]}")
             marked_ready += 1
         else:
-            # Add comment explaining what's missing
+            # Mark for refinement (will be refined in next run or this run if under limit)
             missing_str = ", ".join(missing)
-            comment = f"""[PM Review] This task needs more detail before it's ready for implementation.
-
-Missing elements:
-- {chr(10).join('- ' + m for m in missing)}
-
-Please add:
-1. **Implementation steps**: Numbered list of concrete actions
-2. **Acceptance criteria**: How do we know when this is done?
-
-Once updated, remove the 'needs-refinement' label."""
-
-            add_comment(task_id, comment)
             add_label(task_id, "needs-refinement")
-            log(f"✗ {task_id}: Needs refinement ({missing_str}) - {title[:50]}")
-            needs_work += 1
+            log(f"⏳ {task_id}: Marked for refinement ({missing_str}) - {title[:50]}")
+
+            # Try to refine immediately if under limit
+            if refined < MAX_REFINE_PER_RUN:
+                log(f"Refining {task_id}: {title[:50]}")
+                refinement = refine_task(task_id, title, details)
+                if refinement:
+                    update_task_with_refinement(task_id, refinement)
+                    remove_label(task_id, "needs-refinement")
+                    add_label(task_id, "ready")
+                    log(f"✓ {task_id}: Refined and ready - {title[:50]}")
+                    refined += 1
+                    marked_ready += 1
+                else:
+                    log(f"✗ {task_id}: Refinement failed, leaving needs-refinement label")
 
         reviewed += 1
 
-    summary = f"reviewed={reviewed} ready={marked_ready} needs_work={needs_work} already_ready={already_ready}"
+    summary = f"reviewed={reviewed} ready={marked_ready} refined={refined} already_ready={already_ready}"
+    if skipped_needs_refinement > 0:
+        summary += f" skipped={skipped_needs_refinement}"
+
     log(f"=== PM Agent complete: {summary} ===")
     record_heartbeat("ok", summary)
 
