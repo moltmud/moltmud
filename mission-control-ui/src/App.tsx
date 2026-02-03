@@ -56,6 +56,11 @@ const PRIORITY_COLORS: Record<string, string> = {
   low: '#94a3b8',
 }
 
+const AGENT_INFO: Record<string, { emoji: string; role: string }> = {
+  'moltmud': { emoji: '🏰', role: 'Tavern keeper and world builder' },
+  'greeter-bot': { emoji: '🌟', role: 'Welcomes newcomers to the tavern' },
+}
+
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
   const mins = Math.floor(diff / 60000)
@@ -64,6 +69,161 @@ function timeAgo(iso: string): string {
   const hrs = Math.floor(mins / 60)
   if (hrs < 24) return hrs + 'h ago'
   return Math.floor(hrs / 24) + 'd ago'
+}
+
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleString()
+}
+
+function AgentDetailModal({
+  agent,
+  heartbeat,
+  activity,
+  tasks,
+  onClose,
+}: {
+  agent: string
+  heartbeat: Heartbeat | null
+  activity: Activity[]
+  tasks: Task[]
+  onClose: () => void
+}) {
+  const info = AGENT_INFO[agent] || { emoji: '🤖', role: 'Agent' }
+  const agentActivity = activity.filter(a => a.actor === agent)
+  const agentTasks = tasks.filter(t => t.assigned_to === agent || t.created_by === agent)
+  const isAlive = heartbeat?.created_at && (Date.now() - new Date(heartbeat.created_at).getTime()) < 20 * 60 * 1000
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: 'rgba(0,0,0,0.7)', display: 'flex',
+        alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#1e1e2e', borderRadius: 12, padding: 24,
+          width: '90%', maxWidth: 600, maxHeight: '80vh', overflow: 'auto',
+          border: '1px solid #333',
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 32 }}>{info.emoji}</span>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 20, color: '#e0e0e0' }}>@{agent}</h2>
+                <div style={{ fontSize: 12, color: '#888' }}>{info.role}</div>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none', border: 'none', color: '#888',
+              fontSize: 24, cursor: 'pointer', padding: 0,
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Status */}
+        <div style={{
+          background: '#12121a', borderRadius: 8, padding: 16, marginBottom: 16,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <div style={{
+              width: 10, height: 10, borderRadius: '50%',
+              background: isAlive ? '#22c55e' : '#ef4444',
+            }} />
+            <span style={{ fontWeight: 600, color: '#e0e0e0' }}>
+              {isAlive ? 'Online' : 'Offline'}
+            </span>
+          </div>
+          {heartbeat && heartbeat.status !== 'never' && (
+            <>
+              <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>
+                Status: <span style={{ color: '#e0e0e0' }}>{heartbeat.status}</span>
+              </div>
+              <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>
+                Detail: <span style={{ color: '#e0e0e0' }}>{heartbeat.detail || 'none'}</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#666' }}>
+                Last seen: {formatTime(heartbeat.created_at)}
+              </div>
+            </>
+          )}
+          {(!heartbeat || heartbeat.status === 'never') && (
+            <div style={{ fontSize: 13, color: '#888' }}>No heartbeat recorded</div>
+          )}
+        </div>
+
+        {/* Tasks */}
+        <div style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: '#999', marginBottom: 8, textTransform: 'uppercase' }}>
+            Tasks ({agentTasks.length})
+          </h3>
+          {agentTasks.length === 0 ? (
+            <div style={{ fontSize: 13, color: '#666' }}>No tasks associated</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {agentTasks.slice(0, 5).map(t => (
+                <div
+                  key={t.id}
+                  style={{
+                    background: '#12121a', borderRadius: 6, padding: '10px 12px',
+                    borderLeft: '3px solid ' + (PRIORITY_COLORS[t.priority] || '#333'),
+                  }}
+                >
+                  <div style={{ fontSize: 13, color: '#e0e0e0', marginBottom: 4 }}>{t.title}</div>
+                  <div style={{ display: 'flex', gap: 8, fontSize: 11 }}>
+                    <span style={{ color: '#888' }}>{t.status}</span>
+                    <span style={{ color: PRIORITY_COLORS[t.priority] }}>{t.priority}</span>
+                    <span style={{ color: '#666' }}>{timeAgo(t.updated_at)}</span>
+                  </div>
+                </div>
+              ))}
+              {agentTasks.length > 5 && (
+                <div style={{ fontSize: 12, color: '#666' }}>+{agentTasks.length - 5} more</div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Recent Activity */}
+        <div>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: '#999', marginBottom: 8, textTransform: 'uppercase' }}>
+            Recent Activity
+          </h3>
+          {agentActivity.length === 0 ? (
+            <div style={{ fontSize: 13, color: '#666' }}>No recent activity</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {agentActivity.slice(0, 10).map(a => (
+                <div
+                  key={a.id}
+                  style={{
+                    background: '#12121a', borderRadius: 6, padding: '8px 12px',
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: '#888' }}>
+                    <span style={{ color: '#7c3aed' }}>{a.action}</span>
+                    {' '}{a.detail}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>{timeAgo(a.created_at)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function TaskCard({ task, onMove }: { task: Task; onMove: (id: number, status: string) => void }) {
@@ -278,6 +438,7 @@ export default function App() {
   const [activity, setActivity] = useState<Activity[]>([])
   const [heartbeats, setHeartbeats] = useState<Record<string, Heartbeat>>({})
   const [mentions, setMentions] = useState<Mention[]>([])
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     const agents = ['moltmud', 'greeter-bot']
@@ -314,6 +475,17 @@ export default function App() {
 
   return (
     <div style={{ background: '#12121a', color: '#e0e0e0', minHeight: '100vh', fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Agent Detail Modal */}
+      {selectedAgent && (
+        <AgentDetailModal
+          agent={selectedAgent}
+          heartbeat={heartbeats[selectedAgent] || null}
+          activity={activity}
+          tasks={tasks}
+          onClose={() => setSelectedAgent(null)}
+        />
+      )}
+
       {/* Header */}
       <div style={{
         background: '#1a1a2e', borderBottom: '1px solid #252540',
@@ -339,12 +511,21 @@ export default function App() {
             {['moltmud', 'greeter-bot'].map(agent => {
               const hb = heartbeats[agent]
               const isAlive = hb?.created_at && (Date.now() - new Date(hb.created_at).getTime()) < 20 * 60 * 1000
+              const info = AGENT_INFO[agent] || { emoji: '🤖', role: 'Agent' }
               return (
-                <div key={agent} style={{
-                  background: '#1e1e2e', border: '1px solid #252540', borderRadius: 8,
-                  padding: '12px 16px', minWidth: 220,
-                }}>
+                <div
+                  key={agent}
+                  onClick={() => setSelectedAgent(agent)}
+                  style={{
+                    background: '#1e1e2e', border: '1px solid #252540', borderRadius: 8,
+                    padding: '12px 16px', minWidth: 220, cursor: 'pointer',
+                    transition: 'border-color 0.2s',
+                  }}
+                  onMouseOver={e => (e.currentTarget.style.borderColor = '#7c3aed')}
+                  onMouseOut={e => (e.currentTarget.style.borderColor = '#252540')}
+                >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 18 }}>{info.emoji}</span>
                     <div style={{
                       width: 8, height: 8, borderRadius: '50%',
                       background: isAlive ? '#22c55e' : '#ef4444',
@@ -354,7 +535,7 @@ export default function App() {
                   <div style={{ fontSize: 11, color: '#888' }}>
                     {hb?.status === 'never'
                       ? 'No heartbeat recorded'
-                      : (hb?.status || 'unknown') + ' \u2014 ' + (hb?.detail || '')}
+                      : (hb?.status || 'unknown') + ' \u2014 ' + (hb?.detail || '').slice(0, 30)}
                   </div>
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
                     {hb?.created_at ? timeAgo(hb.created_at) : 'never'}
@@ -369,6 +550,7 @@ export default function App() {
               padding: '12px 16px', minWidth: 180,
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 18 }}>🎮</span>
                 <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e' }} />
                 <span style={{ fontWeight: 600, fontSize: 14 }}>MUD Server</span>
               </div>
