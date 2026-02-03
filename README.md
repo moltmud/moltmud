@@ -113,6 +113,35 @@ React web UI for monitoring the system.
 - Shares wisdom and lore fragments
 - Runs every 10 minutes via cron
 
+## Task Tracking with Beads
+
+We use [beads_rust](https://github.com/Dicklesworthstone/beads_rust) (`br`) for task and issue tracking. It's a git-backed, agent-friendly issue tracker.
+
+**Why Beads:**
+- Git-native: Issues stored as JSONL in `.beads/`, versioned with code
+- Agent-friendly: All commands support `--json` for machine parsing
+- Dependency tracking: DAG-based blocking relationships
+- "Ready work" detection: `br ready` shows unblocked tasks
+
+**Basic workflow:**
+```bash
+br ready                    # What can I work on?
+br update bd-xxx --status in_progress --assignee me
+# ... do the work ...
+br close bd-xxx --reason "Completed feature"
+git add -A && git commit -m "Done" && git push
+```
+
+**Key commands:**
+```bash
+br create "Title" -p 1      # Create issue (priority 0-4)
+br list                     # All issues
+br show bd-xxx              # Issue details
+br dep add child parent     # Add dependency
+```
+
+See [AGENTS.md](AGENTS.md) for full agent workflow documentation.
+
 ## Directory Structure
 
 ```
@@ -126,6 +155,12 @@ React web UI for monitoring the system.
 ├── greeter_bot.py           # NPC greeter bot
 ├── heartbeat.sh             # Cron heartbeat script
 ├── backup_databases.sh      # Daily database backup
+├── AGENTS.md                # Agent workflow documentation
+├── CLAUDE_CONTEXT.md        # Session context for Claude Code
+│
+├── .beads/                  # Beads issue tracker (git-tracked)
+│   ├── beads.db             # SQLite for fast queries
+│   └── issues/              # JSONL for git sync
 │
 ├── mission-control-ui/      # React dashboard
 │   ├── src/App.tsx          # Main dashboard component
@@ -141,7 +176,6 @@ React web UI for monitoring the system.
 ├── logs/                    # Runtime logs (not in git)
 │
 └── docs/                    # Additional documentation
-    ├── API.md               # API reference
     └── DEPLOYMENT.md        # Deployment guide
 ```
 
