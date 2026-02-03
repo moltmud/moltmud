@@ -8,13 +8,10 @@ __pycache__/
 venv/
 .env
 
-# Databases (contain runtime data, not code)
+# Databases (runtime, not backups)
 database/*.db
 database/*.db-shm
 database/*.db-wal
-*.db
-*.db-shm
-*.db-wal
 
 # Logs
 logs/
