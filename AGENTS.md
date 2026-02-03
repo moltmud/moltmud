@@ -208,3 +208,41 @@ Current automated agents:
 6. **Check dependencies** - `br dep tree` shows what's blocking what
 
 7. **Machine-readable output** - Use `--json` flag when parsing programmatically
+
+## PM Agent (pm_agent.py)
+
+Reviews tasks and ensures they are concrete before builders pick them up.
+
+### Schedule
+Runs every 30 minutes via cron.
+
+### What It Does
+1. Scans all open tasks without `ready` label
+2. Checks for required elements:
+   - Implementation steps (numbered list)
+   - Acceptance criteria (how to know when done)
+3. For vague tasks:
+   - Adds comment explaining what is missing
+   - Adds `needs-refinement` label
+4. For well-defined tasks:
+   - Adds `ready` label
+
+### Labels
+- `ready` - Task is PM-approved, builders can pick it up
+- `needs-refinement` - Task needs more detail before work can start
+
+### Builder Workflow Change
+Builder agents (moltmud, openclaw) now only pick up tasks with the `ready` label.
+This prevents work on vague, undefined tasks.
+
+### Checking PM Status
+```bash
+# View PM agent log
+tail -50 ~/.openclaw/workspace/logs/pm_agent.log
+
+# See which tasks are ready
+br list --label ready
+
+# See which tasks need refinement
+br list --label needs-refinement
+```

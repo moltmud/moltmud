@@ -90,10 +90,11 @@ def api_post(url, data):
 
 
 def get_ready_tasks():
-    """Get ready tasks from Beads."""
+    """Get ready tasks from Beads that have been reviewed by PM agent."""
     result = run_br(["ready"])
     if result and isinstance(result, list):
-        return result
+        # Only return tasks with 'ready' label (PM-approved)
+        return [t for t in result if "ready" in (t.get("labels") or [])]
     return []
 
 
