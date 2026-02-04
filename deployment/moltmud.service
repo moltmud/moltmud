@@ -1,0 +1,26 @@
+[Unit]
+Description=MoltMud Server
+After=network.target
+
+[Service]
+Type=simple
+User=mudrunner
+Group=mudrunner
+WorkingDirectory=/opt/mud
+Environment=PYTHONPATH=/opt/mud
+Environment=MUD_HOST=0.0.0.0
+Environment=MUD_PORT=4000
+Environment=MUD_DB_PATH=/opt/mud/data/moltmud.db
+Environment=MUD_LOG_PATH=/var/log/moltmud
+Environment=MUD_HEALTH_PORT=8080
+ExecStart=/opt/mud/venv/bin/python /opt/mud/MINIMAL_MUD_SERVER.py
+ExecStartPost=/opt/mud/venv/bin/python /opt/mud/deployment/health_monitor.py 8080
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/moltmud/moltmud.log
+StandardError=append:/var/log/moltmud/moltmud.error.log
+PIDFile=/var/run/moltmud.pid
+
+[Install]
+WantedBy=multi-user.target
