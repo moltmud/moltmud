@@ -1,0 +1,106 @@
+groups:
+  - name: moltmud_slo_alerts
+    interval: 30s
+    rules:
+      # Latency SLO: 95th percentile < 500ms for 5min
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          priority: P3
+        annotations:
+          summary: "High latency detected in {{ $labels.job }}"
+          description: "95th percentile latency is {{ $value }}s for {{ $labels.job }}"
+
+      # Error Rate SLO: < 0.1% for 2min
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[2m])) by (job)
+            /
+            sum(rate(http_requests_total[2m])) by (job)
+          ) > 0.001
+        for: 2m
+        labels:
+          severity: critical
+          priority: P1
+        annotations:
+          summary: "High error rate in {{ $labels.job }}"
+          description: "Error rate is {{ $value | humanizePercentage }} for {{ $labels.job }}"
+
+      # Resource utilization > 85%
+      - alert: HighResourceUtilization
+        expr: |
+          (
+            100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+          )
+          or
+          (
+            (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+          )
+        for: 5m
+        labels:
+          severity: warning
+          priority: P2
+        annotations:
+          summary: "High resource utilization on {{ $labels.instance }}"
+          description: "CPU or Memory usage > 85% for 5 minutes"
+
+      # Dead man's switch - alert if metrics stop flowing
+      - alert: MissingMetrics
+        expr: up{job=~"mud-http-api|mud-tcp-server|mission-control"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          priority: P1
+        annotations:
+          summary: "Metrics missing from {{ $labels.job }}"
+          description: "No metrics received from {{ $labels.job }} for 1 minute"
+
+      # Service availability
+      - alert: ServiceDown
+        expr: up{job=~"mud-http-api|mud-tcp-server|mission-control"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          priority: P1
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} has been down for more than 2 minutes"
+
+      # Database connection alerts
+      - alert: DatabaseConnectionFailure
+        expr: increase(db_connection_errors_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          priority: P1
+        annotations:
+          summary: "Database connection failures detected"
+          description: "{{ $value }} DB connection errors in 5 minutes"
+
+      # Agent heartbeat monitoring
+      - alert: AgentHeartbeatStale
+        expr: |
+          (
+            time() - mission_control_last_heartbeat_timestamp_seconds
+          ) > 1200
+        for: 5m
+        labels:
+          severity: warning
+          priority: P2
+        annotations:
+          summary: "Agent {{ $labels.agent }} heartbeat is stale"
+          description: "No heartbeat from {{ $labels.agent }} for 20 minutes"
+
+      # Business metric: Task backlog
+      - alert: HighTaskBacklog
+        expr: mission_control_tasks_total{status="inbox"} > 50
+        for: 10m
+        labels:
+          severity: warning
+          priority: P3
+        annotations:
+          summary: "High task backlog in inbox"
+          description: "{{ $value }} tasks waiting in inbox"
